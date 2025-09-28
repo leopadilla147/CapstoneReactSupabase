@@ -58,7 +58,7 @@ function SearchResultsPage() {
 
       let queryBuilder = supabase
         .from('thesestwo')
-        .select('thesisID, title, author, abstract, college, batch, created_at, qr_code_url');
+        .select('thesis_id, title, author, abstract, college, batch, created_at, qr_code_url');
 
       // Apply search
       if (searchQuery.trim()) {
@@ -372,7 +372,7 @@ function SearchResultsPage() {
           <div className="grid gap-6 w-full">
             {results.map((thesis) => (
               <div
-                key={thesis.thesisID}
+                key={thesis.thesis_id}
                 className="bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden w-full"
               >
                 <div className="p-6">
