@@ -193,7 +193,7 @@ const AdminPage = () => {
               </div>
             </div>
 
-            {/* Quick Actions Grid - Larger and More Prominent */}
+            {/* Quick Actions Grid - Larger and More Prominent 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 justify-items-center">
               <Link to="/add-thesis-page" className="w-full max-w-md transform transition hover:scale-105">
                 <div className="bg-red-800 hover:bg-red-700 text-white font-bold text-2xl w-full h-40 rounded-2xl flex flex-col items-center justify-center text-center shadow-2xl">
@@ -215,7 +215,7 @@ const AdminPage = () => {
                   Viewing of Thesis
                 </div>
               </Link>
-            </div>
+            </div> */}
 
             {/* College-wise Statistics */}
             <div className="mt-12 bg-white/80 backdrop-blur-sm rounded-2xl p-8 shadow-lg">
