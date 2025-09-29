@@ -9,18 +9,10 @@ const CommonHeader = ({ isAuthenticated = false, onLogOut, userRole = 'guest', h
   const [showNotifications, setShowNotifications] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
-  // Fixed: Add empty dependency array to run only on mount
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user'));
     setCurrentUser(user);
-  }, []); // Empty dependency array = run only once on mount
-
-  // Alternative: If you need to respond to authentication changes, 
-  // you can add specific dependencies:
-  // useEffect(() => {
-  //   const user = JSON.parse(localStorage.getItem('user'));
-  //   setCurrentUser(user);
-  // }, [isAuthenticated, location.pathname]); // Only run when these change
+  }, []);
 
   const toggleNotifications = () => {
     setShowNotifications(prev => !prev);
@@ -46,13 +38,11 @@ const CommonHeader = ({ isAuthenticated = false, onLogOut, userRole = 'guest', h
     if (onLogOut) {
       onLogOut();
     } else {
-      // Default logout behavior
       localStorage.removeItem('user');
       setCurrentUser(null);
       if (location.pathname !== '/') {
         navigate('/');
       } else {
-        // Force refresh if already on home page
         window.location.reload();
       }
     }
@@ -65,7 +55,6 @@ const CommonHeader = ({ isAuthenticated = false, onLogOut, userRole = 'guest', h
     return 'Login';
   };
 
-  // Don't show login button if hideLoginButton is true
   const shouldShowLoginButton = !hideLoginButton;
 
   return (

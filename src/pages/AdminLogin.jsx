@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, LogIn, Shield, ArrowLeft } from 'lucide-react';
 import { supabase } from '../connect-supabase.js';
 import bg from '../assets/bg-gradient.png';
+import logo from '../assets/logo.png'; // Import the logo
 
 const AdminLogin = () => {
   const [username, setUsername] = useState('');
@@ -95,27 +96,25 @@ const AdminLogin = () => {
       className="w-screen min-h-screen bg-cover bg-center bg-no-repeat flex flex-col"
       style={{ backgroundImage: `url(${bg})` }}
     >
-      {/* Custom Header for Admin Login with Back Button */}
+      {/* Custom Header for Admin Login with Back Button on Right */}
       <header className="w-full flex items-center justify-between px-6 py-4 text-white">
+        {/* Logo and College Name */}
         <div className="flex items-center space-x-4">
-          <button 
-            onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-white hover:text-gray-200 transition-colors p-2"
-          >
-            <ArrowLeft size={24} />
-            <span>Back to Home</span>
-          </button>
-          <div className="flex items-center space-x-4">
-            <img src={('../assets/logo.png')} alt="CNSC Logo" className="w-16 h-16" />
-            <div>
-              <h1 className="font-bold text-lg leading-tight">CAMARINES NORTE STATE COLLEGE</h1>
-              <p className="text-sm">F. Pimentel Avenue, Daet, Camarines Norte, Philippines</p>
-            </div>
+          <img src={logo} alt="CNSC Logo" className="w-16 h-16" />
+          <div>
+            <h1 className="font-bold text-lg leading-tight">CAMARINES NORTE STATE COLLEGE</h1>
+            <p className="text-sm">F. Pimentel Avenue, Daet, Camarines Norte, Philippines</p>
           </div>
         </div>
         
-        {/* Empty div to balance the layout */}
-        <div className="w-24"></div>
+        {/* Back Button on Top Right */}
+        <button 
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2 text-white hover:text-gray-200 transition-colors p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm"
+        >
+          <ArrowLeft size={20} />
+          <span>Back to Home</span>
+        </button>
       </header>
 
       {/* Main Content */}
