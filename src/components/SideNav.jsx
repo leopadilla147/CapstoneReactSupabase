@@ -162,10 +162,6 @@ const SideNav = ({ isOpen, onClose }) => {
     }
   }, [isOpen]);
 
-  const handleRefresh = () => {
-    fetchStatistics();
-  };
-
   // Function to get display name
   const getDisplayName = () => {
     if (!adminUser) return 'Loading...';
@@ -331,29 +327,8 @@ const SideNav = ({ isOpen, onClose }) => {
                 <span className="font-semibold text-white">{stats.pendingRequests}</span>
               </div>
 
-              {/* Overdue Theses */}
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${
-                    stats.overdueTheses > 0 ? 'bg-red-400 animate-pulse' : 'bg-red-400'
-                  }`}></div>
-                  <span className="text-red-200 text-sm">Overdue Theses:</span>
-                </div>
-                <span className="font-semibold text-white">{stats.overdueTheses}</span>
-              </div>
-
             </div>
           )}
-
-          {/* Refresh Button */}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="w-full mt-4 bg-red-700 hover:bg-red-600 disabled:bg-red-800 text-white text-xs py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-            {loading ? 'Refreshing...' : 'Refresh Stats'}
-          </button>
         </div>
 
         {/* Alerts Section */}

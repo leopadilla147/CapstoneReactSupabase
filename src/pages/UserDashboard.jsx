@@ -218,10 +218,10 @@ const UserDashboard = () => {
             <div className="mb-8">
               <div className="flex justify-between items-center">
                 <div>
-                  <h1 className="text-4xl font-bold text-white mb-2">
+                  <h1 className="text-4xl font-bold text-black mb-2">
                     Welcome back{user?.full_name ? `, ${user.full_name}` : '!'}
                   </h1>
-                  <p className="text-white/80 text-lg">
+                  <p className="text-black/80 text-lg">
                     Track your thesis access requests and viewing history
                   </p>
                 </div>

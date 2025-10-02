@@ -32,6 +32,13 @@ function SearchResultsPage() {
     fetchFilterOptions();
   }, []);
 
+  // Fetch results only when query changes (from URL) or filters change
+  useEffect(() => {
+    if (query) {
+      fetchResults(query);
+    }
+  }, [query, filters]); // Only refresh when query or filters change
+
   const fetchFilterOptions = async () => {
     try {
       const { data: collegeData } = await supabase
@@ -51,6 +58,7 @@ function SearchResultsPage() {
     }
   };
 
+  // SIMPLIFIED: Use basic search that works
   const fetchResults = useCallback(async (searchQuery = '') => {
     try {
       setLoading(true);
@@ -60,7 +68,7 @@ function SearchResultsPage() {
         .from('thesestwo')
         .select('thesis_id, title, author, abstract, college, batch, created_at, qr_code_url');
 
-      // Apply search
+      // Apply search - using simple ilike for now
       if (searchQuery.trim()) {
         queryBuilder = queryBuilder.or(
           `title.ilike.%${searchQuery}%,author.ilike.%${searchQuery}%,abstract.ilike.%${searchQuery}%,college.ilike.%${searchQuery}%`
@@ -90,43 +98,33 @@ function SearchResultsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters]); // Keep filters as dependency
 
-  // Initial load with URL query
-  useEffect(() => {
-    if (query) {
-      fetchResults(query);
-    }
-  }, []); // Only run on initial mount
-
+  // Handle search form submission
   const handleSearch = (e) => {
     e.preventDefault();
     if (searchInput.trim()) {
+      // Update URL and let useEffect handle the fetch
       navigate(`/results?q=${encodeURIComponent(searchInput)}`);
-      fetchResults(searchInput);
     }
   };
 
+  // Handle Enter key in search input
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleSearch(e);
     }
   };
 
+  // Handle filter changes - update state but don't fetch yet
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
-    // Apply filters immediately to current results
-    if (query || searchInput) {
-      fetchResults(query || searchInput);
-    }
+    // The useEffect will automatically trigger because filters changed
   };
 
   const clearFilters = () => {
     const defaultFilters = { college: '', batch: '', sortBy: 'title', sortOrder: 'asc' };
     setFilters(defaultFilters);
-    if (query || searchInput) {
-      fetchResults(query || searchInput);
-    }
   };
 
   const highlightMatches = (text, keyword) => {
@@ -155,12 +153,12 @@ function SearchResultsPage() {
 
       {/* Main Content - Full Width */}
       <div className="w-full px-4 lg:px-8 py-6">
-        {/* Search Header */}
+        {/* Search Header 
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">THESIS HUB</h1>
           <p className="text-xl text-white/90">Search Research Database</p>
         </div>
-
+        */}
         {/* Search Bar - Full Width */}
         <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-6 shadow-lg mb-6 w-full">
           <form onSubmit={handleSearch} className="mb-4">
@@ -178,10 +176,20 @@ function SearchResultsPage() {
               </div>
               <button
                 type="submit"
-                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors flex items-center gap-2"
+                disabled={loading}
+                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                <Search size={20} />
-                Search
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Searching...
+                  </>
+                ) : (
+                  <>
+                    <Search size={20} />
+                    Search
+                  </>
+                )}
               </button>
               <button
                 type="button"
@@ -194,7 +202,7 @@ function SearchResultsPage() {
             </div>
           </form>
 
-          {/* Full-Width Filters - Enhanced Design */}
+          {/* Full-Width Filters */}
           {showFilters && (
             <div className="border-t pt-6 mt-6">
               <div className="flex justify-between items-center mb-4">
@@ -354,16 +362,17 @@ function SearchResultsPage() {
                 : 'No theses available in the database.'
               }
             </p>
-            <button
-              onClick={() => {
-                setSearchInput('');
-                setFilters({ college: '', batch: '', sortBy: 'title', sortOrder: 'asc' });
-                navigate('/results');
-              }}
-              className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700"
-            >
-              View All Theses
-            </button>
+            {query && (
+              <button
+                onClick={() => {
+                  setSearchInput('');
+                  navigate('/results');
+                }}
+                className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700"
+              >
+                View All Theses
+              </button>
+            )}
           </div>
         )}
 
@@ -382,7 +391,7 @@ function SearchResultsPage() {
                       <h2 
                         className="text-xl font-bold text-gray-800 mb-3 leading-tight"
                         dangerouslySetInnerHTML={{
-                          __html: highlightMatches(thesis.title, query || searchInput)
+                          __html: highlightMatches(thesis.title, query)
                         }}
                       />
                       
@@ -391,7 +400,7 @@ function SearchResultsPage() {
                           <User size={16} />
                           <span className="font-medium">Author:</span>
                           <span dangerouslySetInnerHTML={{
-                            __html: highlightMatches(thesis.author, query || searchInput)
+                            __html: highlightMatches(thesis.author, query)
                           }} />
                         </div>
                         <div className="flex items-center gap-2 text-gray-600">
@@ -413,7 +422,7 @@ function SearchResultsPage() {
                         <div
                           className="text-gray-600 leading-relaxed"
                           dangerouslySetInnerHTML={{
-                            __html: highlightMatches(truncateAbstract(thesis.abstract), query || searchInput)
+                            __html: highlightMatches(truncateAbstract(thesis.abstract), query)
                           }}
                         />
                       </div>

@@ -14,7 +14,12 @@ import {
   User,
   Cpu,
   Network,
-  Database
+  Database,
+  Archive,
+  BarChart,
+  Search,
+  Plus,
+  Edit
 } from 'lucide-react';
 import bg from "../assets/bg-gradient.png";
 import CommonHeader from '../components/CommonHeader';
@@ -24,9 +29,11 @@ import { supabase } from '../connect-supabase.js';
 const SmartIOTPage = () => {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('auto-logging');
+  const [activeTab, setActiveTab] = useState('user-logs');
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState([]);
+  const [bookshelfBooks, setBookshelfBooks] = useState([]);
+  const [allTheses, setAllTheses] = useState([]);
   const [settings, setSettings] = useState({
     autoLogging: true,
     logRetentionDays: 30,
@@ -34,22 +41,21 @@ const SmartIOTPage = () => {
     maxBorrowDuration: 7,
     iotDeviceStatus: 'online',
     autoSync: true,
-    realTimeUpdates: true
+    realTimeUpdates: true,
+    bookshelfCapacity: 50,
+    scanTimeout: 30
   });
-  const [adminAccounts, setAdminAccounts] = useState([]);
-  const [newAdmin, setNewAdmin] = useState({
-    full_name: '',
-    email: '',
-    password: '',
-    role: 'admin'
-  });
-  const [showPassword, setShowPassword] = useState(false);
   const [currentAdmin, setCurrentAdmin] = useState(null);
+  const [showAddBookModal, setShowAddBookModal] = useState(false);
+  const [selectedThesis, setSelectedThesis] = useState('');
+  const [bookshelfLocation, setBookshelfLocation] = useState('');
+  const [physicalCondition, setPhysicalCondition] = useState('excellent');
 
   useEffect(() => {
     fetchCurrentAdmin();
     fetchLogs();
-    fetchAdminAccounts();
+    fetchBookshelfBooks();
+    fetchAllTheses();
     fetchSettings();
   }, []);
 
@@ -68,7 +74,7 @@ const SmartIOTPage = () => {
         .from('iot_bookshelf_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(100);
 
       if (error) throw error;
       setLogs(data || []);
@@ -79,18 +85,48 @@ const SmartIOTPage = () => {
     }
   };
 
-  const fetchAdminAccounts = async () => {
+  const fetchBookshelfBooks = async () => {
     try {
+      setLoading(true);
+      // Fetch books from the new bookshelf_inventory table
       const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('role', 'admin')
+        .from('bookshelf_inventory')
+        .select(`
+          *,
+          thesestwo (
+            thesis_id,
+            title,
+            author,
+            abstract,
+            college,
+            batch,
+            file_url,
+            file_name
+          )
+        `)
+        .eq('current_status', 'available')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setAdminAccounts(data || []);
+      setBookshelfBooks(data || []);
     } catch (error) {
-      console.error('Error fetching admin accounts:', error);
+      console.error('Error fetching bookshelf books:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAllTheses = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('thesestwo')
+        .select('thesis_id, title, author, college, batch')
+        .order('title', { ascending: true });
+
+      if (error) throw error;
+      setAllTheses(data || []);
+    } catch (error) {
+      console.error('Error fetching theses:', error);
     }
   };
 
@@ -133,73 +169,6 @@ const SmartIOTPage = () => {
     }
   };
 
-  const handleAddAdmin = async () => {
-    try {
-      if (!newAdmin.full_name || !newAdmin.email || !newAdmin.password) {
-        alert('Please fill all fields');
-        return;
-      }
-
-      setLoading(true);
-
-      // Create user in auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newAdmin.email,
-        password: newAdmin.password,
-      });
-
-      if (authError) throw authError;
-
-      // Create user record in users table
-      const { error: userError } = await supabase
-        .from('users')
-        .insert({
-          id: authData.user.id,
-          full_name: newAdmin.full_name,
-          email: newAdmin.email,
-          role: 'admin',
-          is_active: true
-        });
-
-      if (userError) throw userError;
-
-      setNewAdmin({
-        full_name: '',
-        email: '',
-        password: '',
-        role: 'admin'
-      });
-      
-      fetchAdminAccounts();
-      alert('Admin account created successfully!');
-
-    } catch (error) {
-      console.error('Error creating admin account:', error);
-      alert('Error creating admin account');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteAdmin = async (adminId) => {
-    if (!confirm('Are you sure you want to delete this admin account?')) return;
-
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update({ is_active: false })
-        .eq('id', adminId);
-
-      if (error) throw error;
-      
-      fetchAdminAccounts();
-      alert('Admin account deactivated successfully!');
-    } catch (error) {
-      console.error('Error deleting admin account:', error);
-      alert('Error deleting admin account');
-    }
-  };
-
   const clearLogs = async () => {
     if (!confirm('Are you sure you want to clear all logs? This action cannot be undone.')) return;
 
@@ -219,6 +188,101 @@ const SmartIOTPage = () => {
     }
   };
 
+  const addBookToBookshelf = async () => {
+    if (!selectedThesis || !bookshelfLocation) {
+      alert('Please select a thesis and provide a bookshelf location');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('bookshelf_inventory')
+        .insert({
+          thesis_id: selectedThesis,
+          bookshelf_location: bookshelfLocation,
+          physical_condition: physicalCondition,
+          current_status: settings.iotDeviceStatus === 'maintenance' ? 'maintenance' : 'available',
+          last_scan: new Date().toISOString()
+        });
+
+      if (error) throw error;
+      
+      setShowAddBookModal(false);
+      setSelectedThesis('');
+      setBookshelfLocation('');
+      setPhysicalCondition('excellent');
+      fetchBookshelfBooks();
+      alert('Book added to bookshelf successfully!');
+    } catch (error) {
+      console.error('Error adding book to bookshelf:', error);
+      alert('Error adding book to bookshelf');
+    }
+  };
+
+  const removeBookFromShelf = async (inventoryId) => {
+    if (!confirm('Are you sure you want to remove this book from the bookshelf?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('bookshelf_inventory')
+        .delete()
+        .eq('id', inventoryId);
+
+      if (error) throw error;
+      
+      fetchBookshelfBooks();
+      alert('Book removed from bookshelf successfully!');
+    } catch (error) {
+      console.error('Error removing book:', error);
+      alert('Error removing book');
+    }
+  };
+
+  const updateBookStatus = async (inventoryId, newStatus) => {
+    try {
+      const { error } = await supabase
+        .from('bookshelf_inventory')
+        .update({ 
+          current_status: newStatus,
+          last_scan: new Date().toISOString()
+        })
+        .eq('id', inventoryId);
+
+      if (error) throw error;
+      
+      fetchBookshelfBooks();
+      alert('Book status updated successfully!');
+    } catch (error) {
+      console.error('Error updating book status:', error);
+      alert('Error updating book status');
+    }
+  };
+
+  const simulateIoTActivity = () => {
+    const actions = ['scan', 'borrow', 'return', 'check_in', 'check_out'];
+    const statuses = ['success', 'failed'];
+    const sampleBooks = [
+      'Machine Learning Thesis 2024',
+      'AI Research Document',
+      'Computer Vision Study',
+      'Data Analysis Research'
+    ];
+
+    const newLog = {
+      id: Date.now(),
+      action: actions[Math.floor(Math.random() * actions.length)],
+      book_title: sampleBooks[Math.floor(Math.random() * sampleBooks.length)],
+      book_id: 'TH-' + Math.floor(Math.random() * 1000),
+      user_name: 'Test User ' + Math.floor(Math.random() * 10),
+      user_id: 'user-' + Math.floor(Math.random() * 100),
+      status: statuses[Math.floor(Math.random() * statuses.length)],
+      created_at: new Date().toISOString()
+    };
+    
+    setLogs(prev => [newLog, ...prev.slice(0, 99)]);
+    alert('Simulated IoT activity logged!');
+  };
+
   const toggleSidebar = () => {
     setIsSidebarOpen(prev => !prev);
   };
@@ -230,23 +294,6 @@ const SmartIOTPage = () => {
   const handleLogOut = () => {
     localStorage.removeItem('user');
     navigate('/');
-  };
-
-  const simulateIoTActivity = () => {
-    // Simulate adding a new log entry
-    const newLog = {
-      id: Date.now(),
-      action: 'scan',
-      book_title: 'Sample Thesis Document',
-      book_id: 'TH-' + Math.floor(Math.random() * 1000),
-      user_name: 'Test User',
-      user_id: 'user-' + Math.floor(Math.random() * 100),
-      status: 'success',
-      created_at: new Date().toISOString()
-    };
-    
-    setLogs(prev => [newLog, ...prev.slice(0, 49)]);
-    alert('Simulated IoT activity logged!');
   };
 
   return (
@@ -271,7 +318,7 @@ const SmartIOTPage = () => {
                 Smart IoT Bookshelf Management
               </h1>
               <p className="text-white/80">
-                Manage auto-logging, system settings, and administrator accounts for the IoT Bookshelf system
+                Monitor user activities, manage available books, and configure IoT bookshelf settings
               </p>
             </div>
 
@@ -282,13 +329,15 @@ const SmartIOTPage = () => {
                   <div>
                     <p className="text-gray-600 text-sm">Device Status</p>
                     <p className={`text-2xl font-bold ${
-                      settings.iotDeviceStatus === 'online' ? 'text-green-600' : 'text-red-600'
+                      settings?.iotDeviceStatus === 'online' ? 'text-green-600' : 
+                      settings?.iotDeviceStatus === 'maintenance' ? 'text-yellow-600' : 'text-red-600'
                     }`}>
-                      {settings.iotDeviceStatus === 'online' ? 'Online' : 'Offline'}
+                      {settings?.iotDeviceStatus?.charAt(0)?.toUpperCase() + settings?.iotDeviceStatus?.slice(1) || 'Unknown'}
                     </p>
                   </div>
                   <Network className={`w-8 h-8 ${
-                    settings.iotDeviceStatus === 'online' ? 'text-green-500' : 'text-red-500'
+                    settings.iotDeviceStatus === 'online' ? 'text-green-500' : 
+                    settings.iotDeviceStatus === 'maintenance' ? 'text-yellow-500' : 'text-red-500'
                   }`} />
                 </div>
               </div>
@@ -296,34 +345,32 @@ const SmartIOTPage = () => {
               <div className="bg-white/90 backdrop-blur-sm rounded-xl p-6 shadow-lg">
                 <div className="flex items-center justify-between">
                   <div>
+                    <p className="text-gray-600 text-sm">Available Books</p>
+                    <p className="text-2xl font-bold text-blue-600">{bookshelfBooks.length}</p>
+                  </div>
+                  <Book className="w-8 h-8 text-blue-500" />
+                </div>
+              </div>
+
+              <div className="bg-white/90 backdrop-blur-sm rounded-xl p-6 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div>
                     <p className="text-gray-600 text-sm">Total Logs</p>
-                    <p className="text-2xl font-bold text-blue-600">{logs.length}</p>
+                    <p className="text-2xl font-bold text-purple-600">{logs.length}</p>
                   </div>
-                  <Database className="w-8 h-8 text-blue-500" />
+                  <Database className="w-8 h-8 text-purple-500" />
                 </div>
               </div>
 
               <div className="bg-white/90 backdrop-blur-sm rounded-xl p-6 shadow-lg">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-gray-600 text-sm">Active Admins</p>
-                    <p className="text-2xl font-bold text-purple-600">
-                      {adminAccounts.filter(admin => admin.is_active).length}
-                    </p>
-                  </div>
-                  <Users className="w-8 h-8 text-purple-500" />
-                </div>
-              </div>
-
-              <div className="bg-white/90 backdrop-blur-sm rounded-xl p-6 shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-sm">Auto Logging</p>
+                    <p className="text-gray-600 text-sm">Bookshelf Capacity</p>
                     <p className="text-2xl font-bold text-orange-600">
-                      {settings.autoLogging ? 'Enabled' : 'Disabled'}
+                      {bookshelfBooks.length}/{settings.bookshelfCapacity}
                     </p>
                   </div>
-                  <Settings className="w-8 h-8 text-orange-500" />
+                  <Archive className="w-8 h-8 text-orange-500" />
                 </div>
               </div>
             </div>
@@ -334,8 +381,8 @@ const SmartIOTPage = () => {
               <div className="border-b border-gray-200 mb-6">
                 <nav className="flex -mb-px">
                   {[
-                    { id: 'auto-logging', label: 'Auto Logging', icon: Clock },
-                    { id: 'account-settings', label: 'Admin Accounts', icon: Users },
+                    { id: 'user-logs', label: 'User Logs', icon: Clock },
+                    { id: 'books-available', label: 'Books Available in Smart IOT Bookshelf', icon: Book },
                     { id: 'system-settings', label: 'System Settings', icon: Settings }
                   ].map((tab) => {
                     const IconComponent = tab.icon;
@@ -359,11 +406,11 @@ const SmartIOTPage = () => {
 
               {/* Tab Content */}
               <div>
-                {/* Auto Logging Tab */}
-                {activeTab === 'auto-logging' && (
+                {/* User Logs Tab */}
+                {activeTab === 'user-logs' && (
                   <div>
                     <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Auto Logging System</h2>
+                      <h2 className="text-2xl font-bold text-gray-800">User Activity Logs</h2>
                       <div className="flex gap-2">
                         <button
                           onClick={simulateIoTActivity}
@@ -377,7 +424,7 @@ const SmartIOTPage = () => {
                           className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors"
                         >
                           <RefreshCw size={16} />
-                          Refresh
+                          Refresh Logs
                         </button>
                         <button
                           onClick={clearLogs}
@@ -406,7 +453,7 @@ const SmartIOTPage = () => {
                         <div className="max-h-96 overflow-y-auto">
                           {logs.length === 0 ? (
                             <div className="text-center py-8 text-gray-500">
-                              No logs found. Try simulating some activity or check your IoT devices.
+                              No activity logs found.
                             </div>
                           ) : (
                             logs.map((log, index) => (
@@ -425,6 +472,8 @@ const SmartIOTPage = () => {
                                       ? 'bg-green-100 text-green-800'
                                       : log.action === 'return'
                                       ? 'bg-blue-100 text-blue-800'
+                                      : log.action === 'scan'
+                                      ? 'bg-purple-100 text-purple-800'
                                       : 'bg-gray-100 text-gray-800'
                                   }`}>
                                     {log.action}
@@ -456,121 +505,204 @@ const SmartIOTPage = () => {
                   </div>
                 )}
 
-                {/* Admin Accounts Tab */}
-                {activeTab === 'account-settings' && (
+                {/* Books Available in Smart IOT Bookshelf Tab */}
+                {activeTab === 'books-available' && (
                   <div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Add New Admin Form */}
-                      <div className="bg-gray-50 p-6 rounded-lg border">
-                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                          <User size={20} />
-                          Add New Admin
-                        </h3>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Full Name
-                            </label>
-                            <input
-                              type="text"
-                              value={newAdmin.full_name}
-                              onChange={(e) => setNewAdmin({ ...newAdmin, full_name: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
-                              placeholder="Enter full name"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Email
-                            </label>
-                            <input
-                              type="email"
-                              value={newAdmin.email}
-                              onChange={(e) => setNewAdmin({ ...newAdmin, email: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
-                              placeholder="Enter email address"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Password
-                            </label>
-                            <div className="relative">
-                              <input
-                                type={showPassword ? "text" : "password"}
-                                value={newAdmin.password}
-                                onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
-                                placeholder="Enter password"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500"
-                              >
-                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                              </button>
-                            </div>
-                          </div>
-                          <button
-                            onClick={handleAddAdmin}
-                            disabled={loading}
-                            className="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                          >
-                            <Key size={16} />
-                            {loading ? 'Creating...' : 'Create Admin Account'}
-                          </button>
-                        </div>
+                    <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-2xl font-bold text-gray-800">Books Available in Smart IoT Bookshelf</h2>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setShowAddBookModal(true)}
+                          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
+                        >
+                          <Plus size={16} />
+                          Add Book to Bookshelf
+                        </button>
+                        <button
+                          onClick={fetchBookshelfBooks}
+                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                        >
+                          <RefreshCw size={16} />
+                          Refresh Books
+                        </button>
                       </div>
+                    </div>
 
-                      {/* Existing Admins List */}
-                      <div>
-                        <h3 className="text-lg font-semibold mb-4">Existing Admin Accounts</h3>
-                        <div className="space-y-3">
-                          {adminAccounts.map((admin) => (
+                    {loading ? (
+                      <div className="text-center py-8">
+                        <RefreshCw className="animate-spin mx-auto mb-2 text-gray-600" />
+                        <p className="text-gray-600">Loading bookshelf inventory...</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {bookshelfBooks.length === 0 ? (
+                          <div className="col-span-full text-center py-12">
+                            <Book className="mx-auto mb-4 text-gray-400" size={48} />
+                            <p className="text-gray-500 text-lg">No books available in the bookshelf</p>
+                            <p className="text-gray-400">Add books to the bookshelf to see them here</p>
+                          </div>
+                        ) : (
+                            bookshelfBooks.map((inventoryItem) => (
                             <div
-                              key={admin.id}
-                              className="bg-white p-4 rounded-lg border flex justify-between items-center"
+                              key={inventoryItem.id}
+                              className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm hover:shadow-md transition-shadow"
                             >
-                              <div>
-                                <div className="font-medium">{admin.full_name}</div>
-                                <div className="text-sm text-gray-500">{admin.email}</div>
-                                <div className="text-xs text-gray-400">
-                                  Created: {new Date(admin.created_at).toLocaleDateString()}
+                              <div className="flex justify-between items-start mb-4">
+                                <div>
+                                  <h3 className="font-bold text-lg text-gray-800 mb-1 line-clamp-2">
+                                    {inventoryItem?.thesestwo?.title || 'Unknown Title'}
+                                  </h3>
+                                  <p className="text-sm text-gray-600 mb-2">
+                                    by {inventoryItem?.thesestwo?.author || 'Unknown Author'}
+                                  </p>
                                 </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <span className={`px-2 py-1 rounded-full text-xs ${
-                                  admin.is_active 
-                                    ? 'bg-green-100 text-green-800' 
+                                <span className={`text-xs px-2 py-1 rounded-full ${
+                                  inventoryItem?.current_status === 'available' 
+                                    ? 'bg-green-100 text-green-800'
+                                    : inventoryItem?.current_status === 'maintenance'
+                                    ? 'bg-yellow-100 text-yellow-800'
                                     : 'bg-red-100 text-red-800'
                                 }`}>
-                                  {admin.is_active ? 'Active' : 'Inactive'}
+                                  {inventoryItem?.current_status?.charAt(0)?.toUpperCase() + inventoryItem?.current_status?.slice(1) || 'Unknown'}
                                 </span>
-                                <button
-                                  onClick={() => handleDeleteAdmin(admin.id)}
-                                  className="text-red-600 hover:text-red-800 p-1"
-                                  title="Delete Admin"
+                              </div>
+                              
+                              <div className="space-y-2 mb-4">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-500">College:</span>
+                                  <span className="font-medium">{inventoryItem?.thesestwo?.college || 'N/A'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-500">Batch:</span>
+                                  <span className="font-medium">{inventoryItem?.thesestwo?.batch || 'N/A'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-500">Location:</span>
+                                  <span className="font-medium">{inventoryItem?.bookshelf_location || 'Unknown'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-500">Condition:</span>
+                                  <span className="font-medium capitalize">{inventoryItem?.physical_condition || 'unknown'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-500">Last Scan:</span>
+                                  <span className="font-medium">
+                                    {inventoryItem?.last_scan ? new Date(inventoryItem.last_scan).toLocaleDateString() : 'Never'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2">
+                                <select
+                                  value={inventoryItem?.current_status || 'available'}
+                                  onChange={(e) => updateBookStatus(inventoryItem.id, e.target.value)}
+                                  className="flex-1 bg-gray-100 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                                 >
-                                  <Trash2 size={16} />
+                                  <option value="available">Available</option>
+                                  <option value="borrowed">Borrowed</option>
+                                  <option value="maintenance">Maintenance</option>
+                                  <option value="reserved">Reserved</option>
+                                </select>
+                                <button
+                                  onClick={() => removeBookFromShelf(inventoryItem.id)}
+                                  className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white py-2 px-3 rounded text-sm transition-colors"
+                                  title="Remove from Bookshelf"
+                                >
+                                  <Trash2 size={14} />
                                 </button>
                               </div>
                             </div>
-                          ))}
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {/* Add Book Modal */}
+                    {showAddBookModal && (
+                      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                          <h3 className="text-xl font-bold mb-4">Add Book to Bookshelf</h3>
+                          
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Select Thesis
+                              </label>
+                              <select
+                                value={selectedThesis}
+                                onChange={(e) => setSelectedThesis(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                              >
+                                <option value="">Choose a thesis...</option>
+                                {allTheses.map((thesis) => (
+                                  <option key={thesis.thesis_id} value={thesis.thesis_id}>
+                                    {thesis.title} - {thesis.author}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Bookshelf Location
+                              </label>
+                              <input
+                                type="text"
+                                value={bookshelfLocation}
+                                onChange={(e) => setBookshelfLocation(e.target.value)}
+                                placeholder="e.g., Shelf A1, Row 3"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Physical Condition
+                              </label>
+                              <select
+                                value={physicalCondition}
+                                onChange={(e) => setPhysicalCondition(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                              >
+                                <option value="excellent">Excellent</option>
+                                <option value="good">Good</option>
+                                <option value="fair">Fair</option>
+                                <option value="poor">Poor</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 mt-6">
+                            <button
+                              onClick={() => setShowAddBookModal(false)}
+                              className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={addBookToBookshelf}
+                              className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded transition-colors"
+                            >
+                              Add to Bookshelf
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
 
                 {/* System Settings Tab */}
                 {activeTab === 'system-settings' && (
                   <div>
-                    <h2 className="text-2xl font-semibold mb-6">System Configuration</h2>
+                    <h2 className="text-2xl font-semibold mb-6">IoT Bookshelf System Configuration</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* Auto Logging Settings */}
                       <div className="bg-gray-50 p-6 rounded-lg border">
-                        <h3 className="text-lg font-semibold mb-4">Auto Logging Settings</h3>
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Database size={18} />
+                          Logging Settings
+                        </h3>
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
                             <label className="text-sm font-medium text-gray-700">
@@ -599,19 +731,37 @@ const SmartIOTPage = () => {
                         </div>
                       </div>
 
-                      {/* Notification Settings */}
+                      {/* Bookshelf Settings */}
                       <div className="bg-gray-50 p-6 rounded-lg border">
-                        <h3 className="text-lg font-semibold mb-4">Notification Settings</h3>
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Archive size={18} />
+                          Bookshelf Settings
+                        </h3>
                         <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <label className="text-sm font-medium text-gray-700">
-                              Enable Notifications
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Bookshelf Capacity
                             </label>
                             <input
-                              type="checkbox"
-                              checked={settings.enableNotifications}
-                              onChange={(e) => setSettings({ ...settings, enableNotifications: e.target.checked })}
-                              className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                              type="number"
+                              value={settings.bookshelfCapacity}
+                              onChange={(e) => setSettings({ ...settings, bookshelfCapacity: parseInt(e.target.value) })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                              min="1"
+                              max="200"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Scan Timeout (Seconds)
+                            </label>
+                            <input
+                              type="number"
+                              value={settings.scanTimeout}
+                              onChange={(e) => setSettings({ ...settings, scanTimeout: parseInt(e.target.value) })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                              min="5"
+                              max="120"
                             />
                           </div>
                         </div>
@@ -619,7 +769,10 @@ const SmartIOTPage = () => {
 
                       {/* IoT Device Settings */}
                       <div className="bg-gray-50 p-6 rounded-lg border">
-                        <h3 className="text-lg font-semibold mb-4">IoT Device Settings</h3>
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Cpu size={18} />
+                          Device Settings
+                        </h3>
                         <div className="space-y-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -651,7 +804,10 @@ const SmartIOTPage = () => {
 
                       {/* Borrowing Settings */}
                       <div className="bg-gray-50 p-6 rounded-lg border">
-                        <h3 className="text-lg font-semibold mb-4">Borrowing Settings</h3>
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <BarChart size={18} />
+                          Borrowing Settings
+                        </h3>
                         <div className="space-y-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -674,6 +830,17 @@ const SmartIOTPage = () => {
                               type="checkbox"
                               checked={settings.realTimeUpdates}
                               onChange={(e) => setSettings({ ...settings, realTimeUpdates: e.target.checked })}
+                              className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                            />
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-gray-700">
+                              Enable Notifications
+                            </label>
+                            <input
+                              type="checkbox"
+                              checked={settings.enableNotifications}
+                              onChange={(e) => setSettings({ ...settings, enableNotifications: e.target.checked })}
                               className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
                             />
                           </div>

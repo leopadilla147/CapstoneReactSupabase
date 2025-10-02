@@ -28,32 +28,39 @@ const UserHistory = () => {
     fetchUserHistory(userData.id);
   }, [navigate]);
 
-  // Fetch user history from Supabase
+  // Fetch user history from Supabase - CORRECTED VERSION
   const fetchUserHistory = async (userId) => {
     setLoading(true);
     setError('');
     try {
-      // Fetch borrowing requests with thesis details
+      console.log('Fetching history for user:', userId);
+
+      // Use the working query pattern from BorrowedThesis.jsx
       const { data: borrowingRequests, error: fetchError } = await supabase
         .from('borrowing_requests')
         .select(`
           *,
           thesestwo:thesis_id (
-            thesisID,
             title,
             author,
-            abstract,
             college,
-            batch,
             file_url,
             qr_code_url,
-            created_at
+            batch,
+            thesis_id  // Changed from thesisID to thesis_id
           )
         `)
         .eq('user_id', userId)
-        .order('request_date', { ascending: false });
+        .order('created_at', { ascending: false });
 
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        console.error('Supabase fetch error:', fetchError);
+        // If the complex query fails, try the simple approach
+        await trySimpleQuery(userId);
+        return;
+      }
+
+      console.log('Fetched borrowing requests:', borrowingRequests);
 
       // Transform data to match the activity format
       const userActivities = borrowingRequests.map(request => {
@@ -64,7 +71,7 @@ const UserHistory = () => {
           case 'approved':
             status = 'completed';
             accessType = 'view';
-            duration = `Approved for ${request.duration_days} days`;
+            duration = `Approved for ${request.duration_days || 7} days`;
             break;
           case 'pending':
             status = 'pending';
@@ -81,21 +88,28 @@ const UserHistory = () => {
             accessType = 'view';
             duration = 'Returned';
             break;
+          case 'cancelled':
+            status = 'rejected';
+            accessType = 'request';
+            duration = 'Cancelled';
+            break;
           default:
             status = 'pending';
             accessType = 'request';
             duration = 'Pending approval';
         }
 
+        const accessDate = request.request_date || request.created_at;
+        
         return {
           id: request.id,
-          thesisId: request.thesestwo?.thesisID || 'N/A',
+          thesisId: request.thesestwo?.thesis_id || `T-${request.thesis_id}`, // Changed to thesis_id
           title: request.thesestwo?.title || 'Unknown Thesis',
           author: request.thesestwo?.author || 'Unknown Author',
           college: request.thesestwo?.college || 'Unknown College',
           accessType: accessType,
           status: status,
-          accessDate: request.request_date,
+          accessDate: accessDate,
           duration: duration,
           qrCodeUrl: request.thesestwo?.qr_code_url,
           fileUrl: request.thesestwo?.file_url,
@@ -105,6 +119,7 @@ const UserHistory = () => {
         };
       });
 
+      console.log('Transformed activities:', userActivities);
       setActivities(userActivities);
       setFilteredActivities(userActivities);
 
@@ -116,6 +131,174 @@ const UserHistory = () => {
     }
   };
 
+  // Simple query method as fallback
+  const trySimpleQuery = async (userId) => {
+    try {
+      // First get borrowing requests
+      const { data: simpleRequests, error: simpleError } = await supabase
+        .from('borrowing_requests')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (simpleError) throw simpleError;
+
+      console.log('Simple requests data:', simpleRequests);
+
+      // Then get all thesis data in one query to avoid multiple requests
+      const thesisIds = simpleRequests.map(req => req.thesis_id).filter(id => id);
+      const { data: theses, error: thesesError } = await supabase
+        .from('thesestwo')
+        .select('*')
+        .in('id', thesisIds);
+
+      if (thesesError) {
+        console.error('Error fetching theses:', thesesError);
+        // If batch fetch fails, create activities without thesis details
+        createActivitiesWithoutTheses(simpleRequests);
+        return;
+      }
+
+      console.log('Fetched theses:', theses);
+
+      // Create a map for easy lookup
+      const thesisMap = {};
+      theses.forEach(thesis => {
+        thesisMap[thesis.id] = thesis;
+      });
+
+      // Transform data
+      const userActivities = simpleRequests.map(request => {
+        const thesisData = thesisMap[request.thesis_id];
+        
+        let status, accessType, duration;
+
+        switch (request.status) {
+          case 'approved':
+            status = 'completed';
+            accessType = 'view';
+            duration = `Approved for ${request.duration_days || 7} days`;
+            break;
+          case 'pending':
+            status = 'pending';
+            accessType = 'request';
+            duration = 'Pending approval';
+            break;
+          case 'rejected':
+            status = 'rejected';
+            accessType = 'request';
+            duration = 'Request denied';
+            break;
+          case 'returned':
+            status = 'completed';
+            accessType = 'view';
+            duration = 'Returned';
+            break;
+          case 'cancelled':
+            status = 'rejected';
+            accessType = 'request';
+            duration = 'Cancelled';
+            break;
+          default:
+            status = 'pending';
+            accessType = 'request';
+            duration = 'Pending approval';
+        }
+
+        const accessDate = request.request_date || request.created_at;
+
+        return {
+          id: request.id,
+          thesisId: thesisData?.thesis_id || `T-${request.thesis_id}`,
+          title: thesisData?.title || 'Unknown Thesis',
+          author: thesisData?.author || 'Unknown Author',
+          college: thesisData?.college || 'Unknown College',
+          accessType: accessType,
+          status: status,
+          accessDate: accessDate,
+          duration: duration,
+          qrCodeUrl: thesisData?.qr_code_url,
+          fileUrl: thesisData?.file_url,
+          batch: thesisData?.batch,
+          requestData: request,
+          thesisDetails: thesisData
+        };
+      });
+
+      console.log('Activities with simple query:', userActivities);
+      setActivities(userActivities);
+      setFilteredActivities(userActivities);
+
+    } catch (altError) {
+      console.error('Simple query also failed:', altError);
+      // Last resort: create activities with minimal data
+      createActivitiesWithoutTheses([]);
+      setError('Unable to load detailed history. Showing basic request information.');
+    }
+  };
+
+  // Create activities without thesis data as last resort
+  const createActivitiesWithoutTheses = (requests) => {
+    const userActivities = requests.map(request => {
+      let status, accessType, duration;
+
+      switch (request.status) {
+        case 'approved':
+          status = 'completed';
+          accessType = 'view';
+          duration = `Approved for ${request.duration_days || 7} days`;
+          break;
+        case 'pending':
+          status = 'pending';
+          accessType = 'request';
+          duration = 'Pending approval';
+          break;
+        case 'rejected':
+          status = 'rejected';
+          accessType = 'request';
+          duration = 'Request denied';
+          break;
+        case 'returned':
+          status = 'completed';
+          accessType = 'view';
+          duration = 'Returned';
+          break;
+        case 'cancelled':
+          status = 'rejected';
+          accessType = 'request';
+          duration = 'Cancelled';
+          break;
+        default:
+          status = 'pending';
+          accessType = 'request';
+          duration = 'Pending approval';
+      }
+
+      const accessDate = request.request_date || request.created_at;
+
+      return {
+        id: request.id,
+        thesisId: `T-${request.thesis_id}`,
+        title: 'Thesis Information Unavailable',
+        author: 'Unknown Author',
+        college: 'Unknown College',
+        accessType: accessType,
+        status: status,
+        accessDate: accessDate,
+        duration: duration,
+        qrCodeUrl: null,
+        fileUrl: null,
+        batch: null,
+        requestData: request,
+        thesisDetails: null
+      };
+    });
+
+    setActivities(userActivities);
+    setFilteredActivities(userActivities);
+  };
+
+  // Rest of your component remains the same...
   // Filter activities based on search and filters
   useEffect(() => {
     let filtered = activities;
@@ -147,6 +330,8 @@ const UserHistory = () => {
       lastMonth.setMonth(lastMonth.getMonth() - 1);
 
       filtered = filtered.filter(activity => {
+        if (!activity.accessDate) return false;
+        
         const activityDate = new Date(activity.accessDate);
         switch (dateFilter) {
           case 'today':
@@ -216,14 +401,20 @@ const UserHistory = () => {
   };
 
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    if (!dateString) return 'Unknown date';
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
   };
 
   const clearFilters = () => {
@@ -233,7 +424,6 @@ const UserHistory = () => {
   };
 
   const exportHistory = () => {
-    // Simple CSV export implementation
     const headers = ['Thesis ID', 'Title', 'Author', 'College', 'Access Type', 'Status', 'Date', 'Duration', 'Batch'];
     const csvData = filteredActivities.map(activity => [
       activity.thesisId,
@@ -265,6 +455,8 @@ const UserHistory = () => {
   const handleViewThesis = (fileUrl) => {
     if (fileUrl) {
       window.open(fileUrl, '_blank');
+    } else {
+      alert('Thesis file not available');
     }
   };
 
@@ -281,10 +473,11 @@ const UserHistory = () => {
 
       if (error) throw error;
 
-      // Refresh the history
       if (user) {
         fetchUserHistory(user.id);
       }
+      
+      alert('Request cancelled successfully');
     } catch (error) {
       console.error('Error cancelling request:', error);
       setError('Failed to cancel request. Please try again.');
@@ -307,8 +500,8 @@ const UserHistory = () => {
             <div className="mb-8">
               <div className="flex justify-between items-center">
                 <div>
-                  <h1 className="text-4xl font-bold text-white mb-2">Access History</h1>
-                  <p className="text-white/80 text-lg">
+                  <h1 className="text-4xl font-bold text-black mb-2">Access History</h1>
+                  <p className="text-black/80 text-lg">
                     Track your thesis viewing history and access requests
                   </p>
                 </div>
@@ -326,8 +519,28 @@ const UserHistory = () => {
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                 <p className="text-red-700 font-semibold">{error}</p>
+                <button 
+                  onClick={() => setError('')}
+                  className="text-red-700 underline mt-2"
+                >
+                  Dismiss
+                </button>
               </div>
             )}
+
+            {/* Debug Info - You can remove this after testing */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <h3 className="font-bold text-yellow-800">Debug Info:</h3>
+              <p className="text-yellow-700">User: {user?.id}</p>
+              <p className="text-yellow-700">Activities: {activities.length}</p>
+              <p className="text-yellow-700">Loading: {loading.toString()}</p>
+              <button 
+                onClick={() => console.log('Activities:', activities)}
+                className="bg-yellow-500 text-white px-3 py-1 rounded mt-2"
+              >
+                Log Activities to Console
+              </button>
+            </div>
 
             {/* Filters and Search */}
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-lg mb-6">
@@ -442,7 +655,7 @@ const UserHistory = () => {
             {/* Results Summary */}
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-white">
+                <h2 className="text-2xl font-bold text-[#990000]">
                   {loading ? 'Loading...' : `Found ${filteredActivities.length} activities`}
                 </h2>
                 {hasActiveFilters && (
@@ -457,6 +670,7 @@ const UserHistory = () => {
             {loading && (
               <div className="flex justify-center items-center h-64">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white"></div>
+                <p className="ml-4 text-white">Loading your history...</p>
               </div>
             )}
 

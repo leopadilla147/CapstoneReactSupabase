@@ -327,16 +327,6 @@ const UserSideNav = ({ isOpen, onClose }) => {
               )}
             </div>
           )}
-
-          {/* Refresh Button */}
-          <button
-            onClick={() => user && user.id && fetchUserStats(user.id)}
-            disabled={loading}
-            className="w-full mt-4 bg-red-700 hover:bg-red-600 disabled:bg-red-800 text-white text-xs py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            <Clock size={12} />
-            {loading ? 'Refreshing...' : 'Refresh Stats'}
-          </button>
         </div>
 
         {/* Current Time */}
